@@ -1,0 +1,58 @@
+name: Bump a committed version
+description: >-
+  Raise the major, minor or patch part of a MAJOR.MINOR.PATCH version committed in a file,
+  reset the parts after it, and replace the old version in other files. Needs Go 1.27.2 or
+  later on the runner, such as from actions/setup-go.
+author: edspc
+branding:
+  icon: tag
+  color: blue
+
+inputs:
+  part:
+    description: Part of the version to raise; major, minor or patch
+    required: true
+  file:
+    description: Relative path of the file that holds the version
+    required: true
+  pattern:
+    description: >-
+      Regular expression, matched per line, with exactly one group around the version.
+      It must match once in the file. The default finds `const version = "X.Y.Z"`.
+    required: false
+    default: '^const version = "([^"]*)"$'
+  replace:
+    description: >-
+      Comma- or newline-separated relative paths of files in which the old version is
+      replaced wherever it stands alone (not inside 11.2.3 or 1.2.30), such as README.md.
+      Nothing is written unless all of them can be read.
+    required: false
+    default: ''
+  working-directory:
+    description: Directory of the Go module to work in; the paths of the other inputs are relative to it
+    required: false
+    default: '.'
+
+outputs:
+  version:
+    description: The new version, without v
+    value: ${{ steps.bump.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - id: bump
+      shell: bash
+      env:
+        BUMP_PART: ${{ inputs.part }}
+        BUMP_FILE: ${{ inputs.file }}
+        BUMP_PATTERN: ${{ inputs.pattern }}
+        BUMP_REPLACE: ${{ inputs.replace }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        tool="$RUNNER_TEMP/go-release-actions"
+        # Built for the runner itself, whatever Go settings the job has for its own builds.
+        GOOS= GOARCH= GOWORK=off GOFLAGS= go build -C "$GITHUB_ACTION_PATH/.." -trimpath -o "$tool" ./cmd/release
+        cd "$WORKING_DIRECTORY"
+        version=$("$tool" bump -part "$BUMP_PART" -file "$BUMP_FILE" -pattern "$BUMP_PATTERN" -replace "$BUMP_REPLACE")
+        echo "version=$version" >> "$GITHUB_OUTPUT"

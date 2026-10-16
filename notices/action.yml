@@ -1,0 +1,65 @@
+name: Gather Go license notices
+description: >-
+  Gather into a directory the license notices that binary archives of a Go program ship:
+  Go's own and the LICENSE, COPYING, NOTICE, AUTHORS and PATENTS files of every module
+  linked into the program, built without cgo for each platform. Optionally check first that
+  the version being released is the one committed in a file. Needs Go 1.27.2 or later on the
+  runner, such as from actions/setup-go, and the module's dependencies downloadable.
+author: edspc
+branding:
+  icon: file-text
+  color: blue
+
+inputs:
+  out:
+    description: >-
+      Relative path of the directory to gather the notices in. It is removed and created
+      again on every run, so it must be missing, empty, or the output of an earlier run.
+    required: true
+  main:
+    description: Main package of the program
+    required: false
+    default: '.'
+  platforms:
+    description: >-
+      Comma- or newline-separated GOOS/GOARCH pairs the program is built for, such as
+      linux/amd64,darwin/arm64. When empty, the platform go builds for by default: GOOS and
+      GOARCH of the job's environment if set, else the runner's own
+    required: false
+    default: ''
+  version:
+    description: Version being released, without v; checked against file when set
+    required: false
+    default: ''
+  file:
+    description: Relative path of the file that holds the committed version, needed with version
+    required: false
+    default: ''
+  pattern:
+    description: Regular expression, matched per line, with exactly one group around the version
+    required: false
+    default: '^const version = "([^"]*)"$'
+  working-directory:
+    description: Directory of the Go module to work in; the paths of the other inputs are relative to it
+    required: false
+    default: '.'
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        NOTICES_OUT: ${{ inputs.out }}
+        NOTICES_MAIN: ${{ inputs.main }}
+        NOTICES_PLATFORMS: ${{ inputs.platforms }}
+        NOTICES_VERSION: ${{ inputs.version }}
+        NOTICES_FILE: ${{ inputs.file }}
+        NOTICES_PATTERN: ${{ inputs.pattern }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        tool="$RUNNER_TEMP/go-release-actions"
+        # Built for the runner itself, whatever Go settings the job has for its own builds.
+        GOOS= GOARCH= GOWORK=off GOFLAGS= go build -C "$GITHUB_ACTION_PATH/.." -trimpath -o "$tool" ./cmd/release
+        cd "$WORKING_DIRECTORY"
+        "$tool" notices -out "$NOTICES_OUT" -main "$NOTICES_MAIN" -platforms "$NOTICES_PLATFORMS" \
+          -version "$NOTICES_VERSION" -file "$NOTICES_FILE" -pattern "$NOTICES_PATTERN"

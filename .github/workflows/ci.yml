@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      # Built from source with the Go of the job; the module checksum database verifies it.
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+      - name: Lint
+        run: golangci-lint run ./...
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: go test -race ./...
+
+  # Runs the actions as a workflow of another repository would, on the fixture module in
+  # testdata. The job cross-builds for Windows, which the actions' own tool must not follow.
+  actions:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      GOOS: windows
+      GOARCH: amd64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Bump
+        id: bump
+        uses: ./bump
+        with:
+          working-directory: testdata/app
+          part: minor
+          file: main.go
+          replace: README.txt
+      - name: Check bump
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          test "$VERSION" = 1.3.0
+          grep -qx 'const version = "1.3.0"' testdata/app/main.go
+          grep -qx 'app 1.3.0, built with lib 11.2.3' testdata/app/README.txt
+      - name: Notices
+        uses: ./notices
+        with:
+          working-directory: testdata/app
+          out: notices
+          platforms: linux/amd64, darwin/arm64
+          version: ${{ steps.bump.outputs.version }}
+          file: main.go
+      - name: Check notices
+        run: |
+          test -f testdata/app/notices/go/LICENSE
+          grep -qx 'Fixture license of example.com/lib.' testdata/app/notices/example.com/lib@v1.0.0/LICENSE
