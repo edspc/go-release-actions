@@ -1,0 +1,60 @@
+name: Check GoReleaser binary assets
+description: >-
+  Check the exact release asset names, executable permissions and Linux ELF or macOS
+  Mach-O signatures in a GoReleaser artifacts.json. Refuse non-binary release assets
+  and check that the combined release license text includes the project, Go and all
+  gathered module notices. Needs Go 1.27.2 or later on the runner.
+author: edspc
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  artifacts:
+    description: Relative path of the GoReleaser artifact manifest
+    required: false
+    default: dist/artifacts.json
+  names:
+    description: Comma- or newline-separated expected release asset names, exactly once each
+    required: true
+  notices:
+    description: Relative directory of gathered Go and module license notices
+    required: true
+  combined:
+    description: Relative file containing the project license and all gathered notices
+    required: true
+  license:
+    description: Relative path of the project license
+    required: false
+    default: LICENSE
+  required-notices:
+    description: >-
+      Comma- or newline-separated glob patterns relative to notices, each of which
+      must match a regular file; go/LICENSE is always required
+    required: false
+    default: ''
+  working-directory:
+    description: Project directory; all file inputs and artifact paths are relative to it
+    required: false
+    default: '.'
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        CHECK_ARTIFACTS: ${{ inputs.artifacts }}
+        CHECK_NAMES: ${{ inputs.names }}
+        CHECK_NOTICES: ${{ inputs.notices }}
+        CHECK_COMBINED: ${{ inputs.combined }}
+        CHECK_LICENSE: ${{ inputs.license }}
+        CHECK_REQUIRED_NOTICES: ${{ inputs.required-notices }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        tool="$RUNNER_TEMP/go-release-actions"
+        # Built for the runner itself, whatever Go settings the job has for its own builds.
+        GOOS='' GOARCH='' GOWORK=off GOFLAGS='' go build -C "$GITHUB_ACTION_PATH/.." -trimpath -o "$tool" ./cmd/release
+        cd "$WORKING_DIRECTORY" || exit
+        "$tool" check-binaries -artifacts "$CHECK_ARTIFACTS" -names "$CHECK_NAMES" \
+          -notices "$CHECK_NOTICES" -combined "$CHECK_COMBINED" -license "$CHECK_LICENSE" \
+          -required-notices "$CHECK_REQUIRED_NOTICES"

@@ -1,6 +1,6 @@
 name: Gather Go license notices
 description: >-
-  Gather into a directory the license notices that binary archives of a Go program ship:
+  Gather into a directory the license notices that distributions of a Go program ship:
   Go's own and the LICENSE, COPYING, NOTICE, AUTHORS and PATENTS files of every module
   linked into the program, built without cgo for each platform. Optionally check first that
   the version being released is the one committed in a file. Needs Go 1.27.2 or later on the
@@ -39,6 +39,16 @@ inputs:
     description: Regular expression, matched per line, with exactly one group around the version
     required: false
     default: '^const version = "([^"]*)"$'
+  combined:
+    description: >-
+      Optional relative file for the project license and all gathered notices, suitable
+      for release notes. Must be outside out and differ from license.
+    required: false
+    default: ''
+  license:
+    description: Relative project license file outside out, included when combined is set
+    required: false
+    default: LICENSE
   working-directory:
     description: Directory of the Go module to work in; the paths of the other inputs are relative to it
     required: false
@@ -55,11 +65,14 @@ runs:
         NOTICES_VERSION: ${{ inputs.version }}
         NOTICES_FILE: ${{ inputs.file }}
         NOTICES_PATTERN: ${{ inputs.pattern }}
+        NOTICES_COMBINED: ${{ inputs.combined }}
+        NOTICES_LICENSE: ${{ inputs.license }}
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
         tool="$RUNNER_TEMP/go-release-actions"
         # Built for the runner itself, whatever Go settings the job has for its own builds.
-        GOOS= GOARCH= GOWORK=off GOFLAGS= go build -C "$GITHUB_ACTION_PATH/.." -trimpath -o "$tool" ./cmd/release
-        cd "$WORKING_DIRECTORY"
+        GOOS='' GOARCH='' GOWORK=off GOFLAGS='' go build -C "$GITHUB_ACTION_PATH/.." -trimpath -o "$tool" ./cmd/release
+        cd "$WORKING_DIRECTORY" || exit
         "$tool" notices -out "$NOTICES_OUT" -main "$NOTICES_MAIN" -platforms "$NOTICES_PLATFORMS" \
-          -version "$NOTICES_VERSION" -file "$NOTICES_FILE" -pattern "$NOTICES_PATTERN"
+          -version "$NOTICES_VERSION" -file "$NOTICES_FILE" -pattern "$NOTICES_PATTERN" \
+          -combined "$NOTICES_COMBINED" -license "$NOTICES_LICENSE"
