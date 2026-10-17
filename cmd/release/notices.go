@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-// notices gathers into a directory the license notices that binary archives of a Go program
+// notices gathers into a directory the license notices that distributions of a Go program
 // ship: Go's own and those of every module linked into the program on any of the platforms.
 // With a version, it first checks that a release has the version committed in a file.
 func notices(root *os.Root, args []string, goCmd goTool, stderr io.Writer) error {
@@ -24,9 +24,31 @@ func notices(root *os.Root, args []string, goCmd goTool, stderr io.Writer) error
 	version := flags.String("version", "", "version being released, checked against -file")
 	file := flags.String("file", "", "file that holds the committed version")
 	pattern := flags.String("pattern", defaultPattern, "regular expression, matched per line, with one group around the version")
+	combined := flags.String("combined", "", "optional file for the project license and gathered notices, for release notes")
+	license := flags.String("license", "LICENSE", "project license file outside -out, included with -combined")
 	snapshot := flags.Bool("snapshot", false, "a snapshot build, whose version is not checked")
 	if err := parse(flags, args, stderr); err != nil {
 		return err
+	}
+	if *combined != "" {
+		for name, path := range map[string]string{"combined": *combined, "license": *license} {
+			if err := local(name, path); err != nil {
+				return err
+			}
+		}
+		dir := filepath.Clean(*outDir)
+		out := filepath.Clean(*combined)
+		// The notices directory is replaced before the project license is combined.
+		projectLicense := filepath.Clean(*license)
+		if projectLicense == dir || strings.HasPrefix(projectLicense, dir+string(filepath.Separator)) {
+			return errors.New("-license must be outside -out")
+		}
+		if out == filepath.Clean(*license) || out == dir || strings.HasPrefix(out, dir+string(filepath.Separator)) {
+			return errors.New("-combined must differ from -license and be outside -out")
+		}
+		if _, err := root.ReadFile(*license); err != nil {
+			return err
+		}
 	}
 	if *version != "" && !*snapshot {
 		if *file == "" {
@@ -43,6 +65,11 @@ func notices(root *os.Root, args []string, goCmd goTool, stderr io.Writer) error
 	dir, err := outputDir(root, *outDir)
 	if err != nil {
 		return err
+	}
+	if *combined != "" {
+		if err = checkLicenseOutsideOutput(root, dir, *license); err != nil {
+			return err
+		}
 	}
 	targets := [][]string{nil} // go's default, from GOOS and GOARCH of the environment
 	if pairs := list(*platforms); len(pairs) > 0 {
@@ -88,6 +115,9 @@ func notices(root *os.Root, args []string, goCmd goTool, stderr io.Writer) error
 		if err = copyNotices(root, modules[name], filepath.Join(dir, filepath.FromSlash(name))); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
 		}
+	}
+	if *combined != "" {
+		return combineNotices(root, dir, *license, *combined)
 	}
 	return nil
 }

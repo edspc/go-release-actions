@@ -81,7 +81,28 @@ jobs:
           platforms: linux/amd64, darwin/arm64
           version: ${{ steps.bump.outputs.version }}
           file: main.go
+          combined: release-licenses.txt
       - name: Check notices
         run: |
           test -f testdata/app/notices/go/LICENSE
           grep -qx 'Fixture license of example.com/lib.' testdata/app/notices/example.com/lib@v1.0.0/LICENSE
+      - name: Build binary asset fixtures
+        run: |
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -C testdata/app -o dist/linux/app .
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -C testdata/app -o dist/darwin/app .
+          cat > testdata/app/dist/artifacts.json <<'JSON'
+          [
+            {"type":"Metadata","name":"metadata.json"},
+            {"type":"Binary","name":"app","path":"dist/linux/app"},
+            {"type":"Binary","name":"app-linux-amd64","path":"dist/linux/app","goos":"linux","extra":{"Format":"binary"}},
+            {"type":"Binary","name":"app-darwin-arm64","path":"dist/darwin/app","goos":"darwin","extra":{"Format":"binary"}}
+          ]
+          JSON
+      - name: Check binaries
+        uses: ./check-binaries
+        with:
+          working-directory: testdata/app
+          names: app-linux-amd64, app-darwin-arm64
+          notices: notices
+          combined: release-licenses.txt
+          required-notices: example.com/lib@*/LICENSE

@@ -1,7 +1,8 @@
 // Command release prepares releases of Go projects. Run it from the project's root:
 //
 //	release bump -part major|minor|patch -file FILE [-pattern REGEXP] [-replace FILES]
-//	release notices -out DIR [-main PACKAGE] [-platforms LIST] [-version VERSION -file FILE [-pattern REGEXP]] [-snapshot=BOOL]
+//	release notices -out DIR [-main PACKAGE] [-platforms LIST] [-version VERSION -file FILE [-pattern REGEXP]] [-snapshot=BOOL] [-combined FILE [-license LICENSE]]
+//	release check-binaries -names NAMES -notices DIR -combined FILE [-artifacts dist/artifacts.json] [-license LICENSE] [-required-notices PATTERNS]
 //
 // -h after a subcommand lists its flags. Files of the project, given by flags, are relative
 // paths inside the working directory: they are read and written through an os.Root there, so
@@ -24,7 +25,7 @@ import (
 	"strings"
 )
 
-const usage = "usage: release bump|notices [flags]; release bump -h or release notices -h lists the flags"
+const usage = "usage: release bump|notices|check-binaries [flags]; -h after a subcommand lists its flags"
 
 // defaultPattern finds a version declared as `const version = "X.Y.Z"`.
 const defaultPattern = `^const version = "([^"]*)"$`
@@ -47,7 +48,7 @@ func main() {
 
 // run runs a subcommand; help goes to stderr, never to stdout, which carries the result.
 func run(args []string, goCmd goTool, stderr io.Writer) (string, error) {
-	if len(args) == 0 || args[0] != "bump" && args[0] != "notices" {
+	if len(args) == 0 || args[0] != "bump" && args[0] != "notices" && args[0] != "check-binaries" {
 		return "", errors.New(usage)
 	}
 	root, err := os.OpenRoot(".")
@@ -57,6 +58,9 @@ func run(args []string, goCmd goTool, stderr io.Writer) (string, error) {
 	defer func() { _ = root.Close() }()
 	if args[0] == "bump" {
 		return bump(root, args[1:], stderr)
+	}
+	if args[0] == "check-binaries" {
+		return "", checkBinaries(root, args[1:], stderr)
 	}
 	return "", notices(root, args[1:], goCmd, stderr)
 }

@@ -176,3 +176,173 @@ func TestNoticesRefuseIncompleteModules(t *testing.T) {
 		})
 	}
 }
+
+func TestNoticesCombineProjectGoAndModules(t *testing.T) {
+	f := noticesProject(t)
+	writeFile(t, "LICENSE", "Project license")
+	args := []string{"notices", "-out", testOut, "-platforms", "linux/amd64", "-combined", "release/NOTICES.txt"}
+	if _, err := run(args, f.run, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	combined := readFile(t, "release/NOTICES.txt")
+	for _, want := range []string{"Project license", "Go license", "Module license", "Module notice"} {
+		if !strings.Contains(combined, want) {
+			t.Errorf("combined notices omit %q", want)
+		}
+	}
+	if _, err := run(args, f.run, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if readFile(t, "release/NOTICES.txt") != combined {
+		t.Fatal("combined notices changed order on a repeated run")
+	}
+}
+
+func TestNoticesRefuseUnsafeCombinedOutput(t *testing.T) {
+	for _, out := range []string{"LICENSE", testOut, testOut + "/all.txt", "../outside.txt"} {
+		t.Run(out, func(t *testing.T) {
+			noticesProject(t)
+			writeFile(t, "LICENSE", "Project license")
+			if _, err := run([]string{"notices", "-out", testOut, "-combined", out}, noGo(t), io.Discard); err == nil {
+				t.Fatal("accepted unsafe combined output")
+			}
+			if readFile(t, "LICENSE") != "Project license" {
+				t.Fatal("changed the project license")
+			}
+		})
+	}
+}
+
+func TestNoticesCombinedOutputCannotAliasLicense(t *testing.T) {
+	for _, link := range []struct {
+		name   string
+		create func(string, string) error
+	}{
+		{"symlink", os.Symlink},
+		{"hardlink", os.Link},
+	} {
+		t.Run(link.name, func(t *testing.T) {
+			f := noticesProject(t)
+			writeFile(t, "LICENSE", "Project license")
+			if err := link.create("LICENSE", "combined.txt"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := run([]string{"notices", "-out", testOut, "-combined", "combined.txt"}, f.run, io.Discard); err == nil || !strings.Contains(err.Error(), "aliases license notice") {
+				t.Fatalf("err = %v", err)
+			}
+			if readFile(t, "LICENSE") != "Project license" {
+				t.Fatal("overwrote the project license")
+			}
+		})
+	}
+}
+
+func TestNoticesKeepCombinedOutputOnIncompleteNotices(t *testing.T) {
+	f := noticesProject(t)
+	writeFile(t, "LICENSE", "Project license")
+	writeFile(t, "combined.txt", "Previous release notices")
+	writeFile(t, filepath.Join(f.moduleDir, "NOTICE.md"), " ")
+	if _, err := run([]string{"notices", "-out", testOut, "-combined", "combined.txt"}, f.run, io.Discard); err == nil || !strings.Contains(err.Error(), "empty license notice") {
+		t.Fatalf("err = %v", err)
+	}
+	if readFile(t, "combined.txt") != "Previous release notices" {
+		t.Fatal("replaced combined output with incomplete notices")
+	}
+}
+
+func TestNoticesCombinesRelativeDirectorySpellings(t *testing.T) {
+	for _, dir := range []string{"./" + testOut, testOut + "/"} {
+		t.Run(dir, func(t *testing.T) {
+			f := noticesProject(t)
+			writeFile(t, "LICENSE", "Project license")
+			if _, err := run([]string{"notices", "-out", dir, "-combined", "combined.txt"}, f.run, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(readFile(t, "combined.txt"), "Go license") {
+				t.Fatal("combined output omits the Go license")
+			}
+		})
+	}
+}
+
+func TestNoticesRefuseLicenseInsideOutputBeforeChangingFiles(t *testing.T) {
+	for _, tc := range []struct{ out, license string }{
+		{testOut, testOut + "/project-LICENSE"},
+		{"./" + testOut + "/", "./" + testOut + "/project-LICENSE"},
+		{testOut, testOut + "/nested/project-LICENSE"},
+		{testOut, testOut + "/nested/../project-LICENSE"},
+		{testOut, testOut},
+	} {
+		t.Run(tc.out+":"+tc.license, func(t *testing.T) {
+			noticesProject(t)
+			writeFile(t, testOut+"/go/LICENSE", "Previous Go license")
+			writeFile(t, testOut+"/module/NOTICE", "Previous module notice")
+			if tc.license != testOut {
+				writeFile(t, filepath.Clean(tc.license), "Project license")
+			}
+			writeFile(t, "combined.txt", "Previous release notices")
+			args := []string{"notices", "-out", tc.out, "-license", tc.license, "-combined", "combined.txt"}
+			if _, err := run(args, noGo(t), io.Discard); err == nil || !strings.Contains(err.Error(), "-license must be outside -out") {
+				t.Fatalf("err = %v", err)
+			}
+			if tc.license != testOut && readFile(t, filepath.Clean(tc.license)) != "Project license" {
+				t.Fatal("changed the project license")
+			}
+			for path, want := range map[string]string{
+				testOut + "/go/LICENSE":    "Previous Go license",
+				testOut + "/module/NOTICE": "Previous module notice",
+				"combined.txt":             "Previous release notices",
+			} {
+				if readFile(t, path) != want {
+					t.Fatalf("changed %s", path)
+				}
+			}
+		})
+	}
+}
+
+func TestNoticesAllowLicenseInSiblingDirectory(t *testing.T) {
+	f := noticesProject(t)
+	license := testOut + "-backup/LICENSE"
+	writeFile(t, license, "Project license")
+	if _, err := run([]string{"notices", "-out", testOut, "-license", license, "-combined", "combined.txt"}, f.run, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(readFile(t, "combined.txt"), "Project license") {
+		t.Fatal("combined output omits the project license")
+	}
+}
+
+func TestNoticesRefuseLicenseAliasingOutputBeforeChangingFiles(t *testing.T) {
+	for _, tc := range []struct{ name, out, license string }{
+		{"license symlink", testOut, "project-LICENSE"},
+		{"parent symlink", testOut, "notice-link/project-LICENSE"},
+		{"output symlink", "notice-link", testOut + "/project-LICENSE"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			noticesProject(t)
+			writeFile(t, testOut+"/go/LICENSE", "Previous Go license")
+			writeFile(t, testOut+"/project-LICENSE", "Project license")
+			writeFile(t, "combined.txt", "Previous release notices")
+			if err := os.Symlink(testOut+"/project-LICENSE", "project-LICENSE"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(testOut, "notice-link"); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"notices", "-out", tc.out, "-license", tc.license, "-combined", "combined.txt"}
+			if _, err := run(args, noGo(t), io.Discard); err == nil || !strings.Contains(err.Error(), "-license must be outside -out") {
+				t.Fatalf("err = %v", err)
+			}
+			for path, want := range map[string]string{
+				testOut + "/go/LICENSE":      "Previous Go license",
+				testOut + "/project-LICENSE": "Project license",
+				"combined.txt":               "Previous release notices",
+			} {
+				if readFile(t, path) != want {
+					t.Fatalf("changed %s", path)
+				}
+			}
+		})
+	}
+}
